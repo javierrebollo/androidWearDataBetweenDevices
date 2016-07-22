@@ -5,19 +5,14 @@ import android.os.Bundle;
 import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
 
+import com.example.data.DataLayerResultListener;
+import com.example.data.SendToDataLayerHelper;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
-import com.google.android.gms.common.api.PendingResult;
-import com.google.android.gms.common.api.ResultCallback;
-import com.google.android.gms.wearable.DataApi;
 import com.google.android.gms.wearable.DataEvent;
 import com.google.android.gms.wearable.DataEventBuffer;
 import com.google.android.gms.wearable.DataMap;
 import com.google.android.gms.wearable.DataMapItem;
-import com.google.android.gms.wearable.Node;
-import com.google.android.gms.wearable.NodeApi;
-import com.google.android.gms.wearable.PutDataMapRequest;
-import com.google.android.gms.wearable.PutDataRequest;
 import com.google.android.gms.wearable.Wearable;
 import com.google.android.gms.wearable.WearableListenerService;
 
@@ -26,8 +21,7 @@ public class BookingListenerService extends WearableListenerService implements G
 
     private static final String WEARABLE_DATA_PATH = "/wearable_data";
     private static final String HANDHELD_DATA_PATH = "/handheld_data";
-    GoogleApiClient googleClient;
-    private SendToDataLayerThread s;
+    private GoogleApiClient mGoogleApiClient;
 
     @Override
     public void onCreate() {
@@ -70,8 +64,17 @@ public class BookingListenerService extends WearableListenerService implements G
                     dataMap.putLong("time", System.currentTimeMillis());
 
                     //Requires a new thread to avoid blocking the UI
-                    s = new SendToDataLayerThread(WEARABLE_DATA_PATH, dataMap);
-                    s.run();
+                    new SendToDataLayerHelper(WEARABLE_DATA_PATH, dataMap, mGoogleApiClient, new DataLayerResultListener() {
+                        @Override
+                        public void onSuccess() {
+
+                        }
+
+                        @Override
+                        public void onError() {
+
+                        }
+                    }).run();
                 }
             }
         }
@@ -82,23 +85,23 @@ public class BookingListenerService extends WearableListenerService implements G
 
         Log.d(getClass().getSimpleName(), "Initialaizing GoogleClient");
 
-        if (googleClient == null) {
-            googleClient = new GoogleApiClient.Builder(this)
+        if (mGoogleApiClient == null) {
+            mGoogleApiClient = new GoogleApiClient.Builder(this)
                     .addApi(Wearable.API)
                     .addConnectionCallbacks(this)
                     .addOnConnectionFailedListener(this)
                     .build();
         }
 
-        if (!googleClient.isConnected()) {
+        if (!mGoogleApiClient.isConnected()) {
             Log.d(getClass().getSimpleName(), "Tring to connect to GoogleApi...");
 
-            googleClient.connect();
+            mGoogleApiClient.connect();
 
         }
 
 
-        Log.d(getClass().getSimpleName(), "Google Client ID = " + googleClient.toString());
+        Log.d(getClass().getSimpleName(), "Google Client ID = " + mGoogleApiClient.toString());
     }
 
     // Disconnect from the data layer when the Activity stops
@@ -108,17 +111,15 @@ public class BookingListenerService extends WearableListenerService implements G
 
         Log.d(getClass().getSimpleName(), "WearService: onDestroy");
 
-        if (null != googleClient && googleClient.isConnected()) {
-            googleClient.disconnect();
+        if (null != mGoogleApiClient && mGoogleApiClient.isConnected()) {
+            mGoogleApiClient.disconnect();
         }
-
-
     }
 
     @Override
     public void onConnected(Bundle bundle) {
         Log.d(getClass().getSimpleName(), "onConnected entered");
-        Log.d(getClass().getSimpleName(), "GoogleAPI now status:" + googleClient.isConnected());
+        Log.d(getClass().getSimpleName(), "GoogleAPI now status:" + mGoogleApiClient.isConnected());
     }
 
     @Override
@@ -129,49 +130,5 @@ public class BookingListenerService extends WearableListenerService implements G
     @Override
     public void onConnectionFailed(ConnectionResult result) {
         Log.e(getClass().getSimpleName(), "Connection to google api has failed. " + result.getErrorMessage());
-    }
-
-    class SendToDataLayerThread {
-        String path;
-        DataMap dataMap;
-
-        // Constructor for sending data objects to the data layer
-        SendToDataLayerThread(String p, DataMap data) {
-            path = p;
-            dataMap = data;
-        }
-
-        public void run() {
-            //NodeApi.GetConnectedNodesResult nodes = Wearable.NodeApi.getConnectedNodes(googleClient);
-            PendingResult<NodeApi.GetConnectedNodesResult> nodes = Wearable.NodeApi.getConnectedNodes(googleClient);
-            nodes.setResultCallback(new ResultCallback<NodeApi.GetConnectedNodesResult>() {
-                @Override
-                public void onResult(NodeApi.GetConnectedNodesResult getConnectedNodesResult) {
-                    for (Node node : getConnectedNodesResult.getNodes()) {
-
-                        final Node node2 = node;
-
-                        // Construct a DataRequest and send over the data layer
-                        PutDataMapRequest putDMR = PutDataMapRequest.create(path);
-                        putDMR.getDataMap().putAll(dataMap);
-                        PutDataRequest request = putDMR.asPutDataRequest();
-                        request.setUrgent();
-
-                        PendingResult<DataApi.DataItemResult> pendingResult = Wearable.DataApi.putDataItem(googleClient, request);
-                        pendingResult.setResultCallback(new ResultCallback<DataApi.DataItemResult>() {
-                            @Override
-                            public void onResult(DataApi.DataItemResult dataItemResult) {
-                                if (dataItemResult.getStatus().isSuccess()) {
-                                    Log.v(getClass().getSimpleName(), "DataMap: " + dataMap + " sent to: " + node2.getDisplayName());
-                                } else {
-                                    // Log an error
-                                    Log.v(getClass().getSimpleName(), "ERROR: failed to send DataMap");
-                                }
-                            }
-                        });
-                    }
-                }
-            });
-        }
     }
 }
